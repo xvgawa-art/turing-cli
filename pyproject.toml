@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "turing-cli"
+version = "1.0.0"
+description = "代码漏洞审计命令行工具"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Turing Team", email = "team@turing.ai"}
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "click>=8.1.0",
+    "pydantic>=2.0.0",
+    "gitpython>=3.1.0",
+    "httpx>=0.24.0",
+    "pyyaml>=6.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+]
+opencode = [
+    "opencode-ai>=0.1.0a36",
+]
+
+[project.scripts]
+turing = "turing_cli.cli:cli"
+
+[project.urls]
+Homepage = "https://github.com/your-org/turing-cli"
+Documentation = "https://github.com/your-org/turing-cli#readme"
+Repository = "https://github.com/your-org/turing-cli.git"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["turing_cli*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

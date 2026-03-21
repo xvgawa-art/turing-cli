@@ -1,0 +1,30 @@
+[
+  {
+    "type": "SQL注入",
+    "bugClass": "com.example.app.repository.UserRepository",
+    "bugMethod": "findByUsername",
+    "bugLine": 45,
+    "bugSig": "(Ljava.lang.String;)Ljava.util.List;",
+    "sinkClass": "com.example.app.utils.DatabaseHelper",
+    "sinkMethod": "executeQuery",
+    "sinkSig": "(Ljava.lang.String;)Ljava.sql.ResultSet;",
+    "callTree": {
+      "root": {
+        "type": "vulnerable",
+        "className": "com.example.app.repository.UserRepository",
+        "methodName": "findByUsername",
+        "line": 45
+      },
+      "children": [
+        {
+          "type": "caller",
+          "className": "com.example.app.service.UserService",
+          "methodName": "getUserByName",
+          "line": 88,
+          "depth": 1,
+          "children": []
+        }
+      ]
+    }
+  }
+]

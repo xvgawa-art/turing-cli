@@ -1,0 +1,105 @@
+# OpenCode 配置文件
+# 默认 Provider 和 Model 配置
+
+# OpenCode 服务地址
+opencode:
+  url: "http://localhost:4097"
+  # url: "https://api.opencode.ai"
+
+# Provider 配置
+providers:
+  # Anthropic Claude
+  anthropic_claude_3_5_opus:
+    id: "claude-3-5-opus"
+    name: "Anthropic Claude 3.5 Opus"
+    description: "高性能大语言模型"
+
+  anthropic_claude_3_sonnet:
+    id: "claude-3-sonnet"
+    name: "Anthropic Claude 3 Sonnet"
+    description: "经济版大语言模型"
+
+  # Google
+  gemini_pro:
+    id: "gemini-2.0-flash"
+    name: "Google Gemini 2. Flash"
+    description: "快速多模态大语言模型"
+
+# Model 配置
+models:
+  # Anthropic Claude
+  claude_3_5_opus:
+    provider: "anthropic_claude_3_5_opus"
+    model_id: "claude-3-5-opus"
+    max_tokens: 200000
+    temperature: 1.0
+    top_p: 0.9
+
+  claude_3_sonnet:
+    provider: "anthropic_claude_3_sonnet"
+    model_id: "claude-3-sonnet-20240620"
+    max_tokens: 200000
+    temperature: 1.0
+  top_p: 1.0
+
+  # Google Gemini
+  gemini_pro:
+    provider: "google_gemini_2_flash"
+    model_id: "gemini-2.0-flash-exp"
+    max_tokens: 1000000
+    temperature: 0.5
+
+# 默认配置
+default:
+  provider: "anthropic_claude_3_5_opus"
+  model_id: "claude-3-5-opus"
+  opencode_url: "http://localhost:4097"
+
+# 高级配置（可选）
+advanced:
+  opencode:
+  timeout: 300  # 请求超时（秒）
+  max_retries: 3     # 最大重试次数
+  max_concurrency: 5  # 最大并发数
+
+  git:    # Git 配置
+    enabled: true
+    deliverables_path: "./deliverables"
+    state_dir: "./deliverables/.turing"
+
+  logging:
+    level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    dir: "./logs"
+
+  # 工作流配置
+  phases:
+    system_analysis:
+      enabled: true
+      agents:
+        - static_scanner
+        business_architecture
+        version_diff
+        security_design
+        historical_vuln
+    threat_analysis:
+      enabled: true
+      agents:
+        asset_identification
+        risk_assessment
+        attack_path
+    code_audit:
+      enabled: true
+      agents:
+        sql_injection
+        xss
+        ssrf
+        auth_bypass
+        command_injection
+        deserialization
+        path_traversal
+
+  # 验证配置
+  validation:
+    enabled: true
+    default_validator: "code_audit"
+  confidence_threshold: "likely"  # confidence >= "likely" 时认为有效

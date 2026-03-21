@@ -1,0 +1,11 @@
+# cli/config_files/agents.yaml
+version: "1.0"
+
+agent_types:
+  sql_injection:
+    name: "SQL注入分析器"
+    description: "分析 SQL 注入漏洞是否为误报"
+    prompt_template: "prompts/sql_injection.md"
+    opencode:
+      provider_id: "anthropic"
+      model_id: "anthropic/claude-opus-4.6"

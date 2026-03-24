@@ -12,6 +12,7 @@
 环境要求:
     - 测试数据在 ~/test_case/ 目录
     - 如需调用 OpenCode，需要 server 运行在 http://localhost:4097
+    - 如需调用 MCP，需要 MCP server 运行在 python -u /opt/server.py
 """
 
 import json
@@ -30,6 +31,7 @@ from turing_cli.agents.context import AgentContext
 from turing_cli.models.deliverable import Deliverable, DeliverableStatus, AgentResult
 from turing_cli.models.validation import ValidationResult
 from turing_cli.config.logging_config import get_logger
+from turing_cli.clients.mcp_client import MCPClient, run_mcp_tool_sync
 
 logger = get_logger(__name__)
 
@@ -45,6 +47,129 @@ DELIVERABLES_DIR = Path("./deliverables")
 
 OPENCODE_URL = "http://localhost:4097"
 MAX_RETRIES = 2
+
+# MCP 配置
+MCP_SERVER_COMMAND = "python -u /opt/server.py"
+MCP_TOOL_NAME = "cloudbug_analyze_cloudbug_analyze"
+USE_MCP = True  # 是否使用 MCP 生成漏洞报告
+
+
+# ============================================================
+# MCP 工具调用
+# ============================================================
+
+
+def generate_vulnerabilities_via_mcp(
+    jar_path: Path,
+    vulnerabilities_jar_path: Path,
+    callchain_json_path: Path,
+    extract_path: Path,
+    output_path: Path,
+) -> bool:
+    """
+    通过 MCP 工具生成漏洞报告
+
+    Args:
+        jar_path: JAR 文件路径
+        vulnerabilities_jar_path: 漏洞 JAR 文件路径
+        callchain_json_path: 调用链 JSON 文件路径
+        extract_path: 提取路径
+        output_path: 输出 JSON 文件路径
+
+    Returns:
+        是否成功
+    """
+    if not MCPClient().is_available():
+        logger.error("MCP 不可用，请安装 mcp 包: pip install mcp")
+        return False
+
+    print("\n" + "=" * 70)
+    print("调用 MCP 工具生成漏洞报告...")
+    print("=" * 70)
+    print(f"  JAR 路径: {jar_path}")
+    print(f"  漏洞 JAR 路径: {vulnerabilities_jar_path}")
+    print(f"  调用链 JSON 路径: {callchain_json_path}")
+    print(f"  提取路径: {extract_path}")
+    print(f"  输出路径: {output_path}")
+
+    # 检查输入文件是否存在
+    for path, name in [
+        (jar_path, "JAR 文件"),
+        (vulnerabilities_jar_path, "漏洞 JAR 文件"),
+        (callchain_json_path, "调用链 JSON 文件"),
+    ]:
+        if not path.exists():
+            logger.error(f"{name}不存在: {path}")
+            return False
+
+    try:
+        # 调用 MCP 工具
+        result = run_mcp_tool_sync(
+            server_command=MCP_SERVER_COMMAND,
+            tool_name=MCP_TOOL_NAME,
+            arguments={
+                "jar_path": str(jar_path),
+                "vulnerabilities_jar_path": str(vulnerabilities_jar_path),
+                "callchain_json_path": str(callchain_json_path),
+                "extract_path": str(extract_path),
+            },
+        )
+
+        print(f"\nMCP 工具执行结果: {result}")
+
+        # 解析结果并保存
+        vulnerabilities = []
+        
+        # MCP 返回结果可能有不同的结构
+        if hasattr(result, "content"):
+            content = result.content
+        elif isinstance(result, dict):
+            content = result
+        elif isinstance(result, list) and len(result) > 0:
+            # 如果是列表，取第一个元素
+            first_item = result[0]
+            if hasattr(first_item, "text"):
+                content = first_item.text
+            elif hasattr(first_item, "content"):
+                content = first_item.content
+            else:
+                content = first_item
+        else:
+            content = str(result)
+
+        # 尝试解析 JSON
+        if isinstance(content, str):
+            # 尝试从字符串中提取 JSON
+            import re
+            json_match = re.search(r"\[[\s\S]*\]", content) or re.search(r"\{[\s\S]*\}", content)
+            if json_match:
+                content = json.loads(json_match.group())
+            else:
+                content = json.loads(content)
+
+        # 确保是列表格式
+        if isinstance(content, dict):
+            vulnerabilities = [content]
+        elif isinstance(content, list):
+            vulnerabilities = content
+        else:
+            logger.error(f"无法解析漏洞数据: {type(content)}")
+            return False
+
+        # 保存到文件
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(vulnerabilities, f, ensure_ascii=False, indent=2)
+
+        print(f"\n成功生成漏洞报告: {output_path}")
+        print(f"  漏洞数量: {len(vulnerabilities)}")
+        return True
+
+    except Exception as e:
+        logger.error(f"调用 MCP 工具失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 
 # ============================================================
@@ -349,15 +474,38 @@ def main():
     print("=" * 70)
 
     # 1. 检查测试数据
-    if not SCAN_RESULT_PATH.exists():
-        print(f"错误: 扫描结果文件不存在: {SCAN_RESULT_PATH}")
-        return 1
-
     if not CODE_PATH.exists():
         print(f"错误: 代码目录不存在: {CODE_PATH}")
         return 1
 
-    # 2. 加载扫描结果
+    # 2. 生成或加载漏洞报告
+    vulnerabilities = []
+    
+    if USE_MCP:
+        # 使用 MCP 工具生成漏洞报告
+        # 定义 MCP 工具所需的参数路径
+        jar_path = TEST_CASE_DIR / "target.jar"  # 假设的 JAR 文件路径
+        vulnerabilities_jar_path = TEST_CASE_DIR / "vulnerabilities.jar"  # 假设的漏洞 JAR 文件路径
+        callchain_json_path = TEST_CASE_DIR / "callchain.json"  # 假设的调用链 JSON 文件路径
+        extract_path = TEST_CASE_DIR / "extracted"  # 提取路径
+        
+        success = generate_vulnerabilities_via_mcp(
+            jar_path=jar_path,
+            vulnerabilities_jar_path=vulnerabilities_jar_path,
+            callchain_json_path=callchain_json_path,
+            extract_path=extract_path,
+            output_path=SCAN_RESULT_PATH,
+        )
+        
+        if not success:
+            print("错误: MCP 工具调用失败")
+            return 1
+    
+    # 加载漏洞报告
+    if not SCAN_RESULT_PATH.exists():
+        print(f"错误: 扫描结果文件不存在: {SCAN_RESULT_PATH}")
+        return 1
+    
     with open(SCAN_RESULT_PATH, encoding="utf-8") as f:
         vulnerabilities = json.load(f)
 

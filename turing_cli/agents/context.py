@@ -6,15 +6,17 @@
 - 任务特定数据
 - 重试反馈机制
 - OpenCode 连接获取
+- MCP 服务获取
 """
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
     from turing_cli.core.opencode.client import OpenCodeClient
+    from turing_cli.mcp.services.audit_service import AuditMCPService
 
 
 class TaskData(BaseModel):
@@ -127,6 +129,10 @@ class AgentContext:
         """
         return self._shared.get("__opencode_client__")
 
+    def get_mcp_service(self) -> Optional["AuditMCPService"]:
+        """获取 MCP 审计服务。"""
+        return self._shared.get("__mcp_service__")
+
     def get_session_id(self) -> Optional[str]:
         """获取当前 Agent 的 Session ID
 
@@ -162,8 +168,8 @@ class AgentContext:
     # ============================================================
     # 跨阶段数据获取
     # ============================================================
-
-    def get_phase_result(self, phase: str, agent_name: Optional[str] = None) -> Dict:
+    
+    def get_phase_result(self, phase: str, agent_name: Optional[str] = None) -> Dict[str, Any]:
         """获取指定阶段的结果
 
         Args:
@@ -180,7 +186,7 @@ class AgentContext:
             return phase_data.get(agent_name, {})
         return phase_data
 
-    def get_all_phase_results(self) -> Dict[str, Dict]:
+    def get_all_phase_results(self) -> Dict[str, Dict[str, Any]]:
         """获取所有阶段的结果
 
         Returns:
@@ -188,7 +194,7 @@ class AgentContext:
         """
         return self._shared.get("phase_results", {})
 
-    def get_previous_phase_results(self) -> Dict[str, Dict]:
+    def get_previous_phase_results(self) -> Dict[str, Dict[str, Any]]:
         """获取上一阶段的所有结果
 
         Returns:
@@ -202,8 +208,7 @@ class AgentContext:
             return {}
 
         if current_idx > 0:
-            prev_phase = phases_order[current_idx - 1]
-            return self.get_phase_result(prev_phase)
+            return self.get_phase_result(phases_order[current_idx - 1])
         return {}
 
     def set_result(self, result: Dict[str, Any]) -> None:
@@ -214,10 +219,8 @@ class AgentContext:
         """
         if "phase_results" not in self._shared:
             self._shared["phase_results"] = {}
-
         if self.phase not in self._shared["phase_results"]:
             self._shared["phase_results"][self.phase] = {}
-
         self._shared["phase_results"][self.phase][self.agent_id] = result
 
     # ============================================================
@@ -335,4 +338,8 @@ class AgentContext:
             "code_path": str(self.code_path),
             "retry_count": self._retry_count,
             "has_feedback": self._feedback is not None,
+            "has_opencode_client": self.get_opencode_client() is not None,
+            "has_mcp_service": self.get_mcp_service() is not None,
         }
+
+

@@ -1,0 +1,19 @@
+# MCP 工具配置
+#
+# 说明：
+# 1. 这里定义的是“逻辑工具 key -> MCP 服务端真实 tool_name”的映射。
+# 2. Agent / Service 层只应依赖 key，例如 method_source，
+#    而不要在业务代码里直接写真实 tool_name。
+# 3. 如果不同项目的 MCP server 工具名不同，只需要改这里，不需要改业务逻辑。
+#
+# 当前结构支持扩展 description，后续也可以继续加：
+# - args_schema
+# - timeout
+# - retry_policy
+# - enabled
+# 等配置项。
+
+tools:
+  method_source:
+    tool_name: method_source
+    description: 根据方法签名或类名/方法名返回源码

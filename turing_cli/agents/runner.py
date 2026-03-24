@@ -3,27 +3,26 @@
 提供 Agent 执行的核心框架：
 - AgentRunner: 管理连接池和 Agent 执行循环
 - BaseAgent: Agent 基类，实现模板方法模式
+- MCP 服务注入：为 Agent 提供工程化 MCP 工具能力
 """
 
-import json
 import threading
 import time
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Dict, List, Optional, Tuple
 
-from turing_cli.config.logging_config import get_logger
+from turing_cli.agents.context import AgentContext
 from turing_cli.config.loader import ConfigLoader
-from turing_cli.models.audit import Vulnerability
-from turing_cli.models.deliverable import Deliverable, DeliverableStatus, AgentResult
-from turing_cli.models.validation import ValidationResult, validate_deliverable
-from turing_cli.agents.context import AgentContext, TaskData
+from turing_cli.config.logging_config import get_logger
 from turing_cli.core.opencode.client import OpenCodeClient
 from turing_cli.core.opencode.session_manager import SessionManager
 from turing_cli.git_ops.manager import GitManager
 from turing_cli.git_ops.rollback import RollbackManager
+from turing_cli.mcp.services.audit_service import AuditMCPService
+from turing_cli.models.deliverable import AgentResult, Deliverable
+from turing_cli.models.validation import ValidationResult, validate_deliverable
 
 logger = get_logger(__name__)
 
@@ -89,39 +88,18 @@ class BaseAgent(ABC):
 
     @abstractmethod
     def execute(self, context: AgentContext) -> Deliverable:
-        """执行 Agent 逻辑（必须实现）
-
-        Args:
-            context: Agent 执行上下文
-
-        Returns:
-            Deliverable 执行结果
-        """
         pass
 
     def validate(self, deliverable: Deliverable) -> ValidationResult:
-        """验证交付件（可选重写）
-
-        默认使用注册表中的验证器。
-
-        Args:
-            deliverable: 交付件
-
-        Returns:
-            ValidationResult 验证结果
-        """
         return validate_deliverable(deliverable)
 
     def build_prompt(self, context: AgentContext) -> str:
-        """构建 prompt（可选重写）"""
         return ""
 
     def on_success(self, context: AgentContext, deliverable: Deliverable) -> None:
-        """成功回调（可选重写）"""
         pass
 
     def on_failure(self, context: AgentContext, error: str) -> None:
-        """失败回调（可选重写）"""
         pass
 
 
@@ -160,15 +138,8 @@ class AgentRunner:
         max_retries: int = 3,
         config_dir: Optional[Path] = None,
         deliverables_dir: Optional[Path] = None,
+        mcp_service: Optional[AuditMCPService] = None,
     ):
-        """初始化 Agent Runner
-
-        Args:
-            opencode_url: OpenCode 服务地址
-            max_retries: 最大重试次数
-            config_dir: 配置目录
-            deliverables_dir: 交付件目录
-        """
         self.opencode_url = opencode_url
         self.max_retries = max_retries
         self.config_dir = config_dir
@@ -177,6 +148,7 @@ class AgentRunner:
         # 连接池
         self._client: Optional[OpenCodeClient] = None
         self._session_mgr: Optional[SessionManager] = None
+        self._mcp_service: Optional[AuditMCPService] = mcp_service
 
         # Agent 注册表
         self._agents: Dict[str, BaseAgent] = {}
@@ -221,6 +193,12 @@ class AgentRunner:
         if self._client is None:
             self.initialize()
         return self._client
+
+    def get_mcp_service(self) -> Optional[AuditMCPService]:
+        return self._mcp_service
+
+    def set_mcp_service(self, mcp_service: Optional[AuditMCPService]) -> None:
+        self._mcp_service = mcp_service
 
     def is_opencode_available(self) -> bool:
         """检查 OpenCode 是否可用"""
@@ -318,6 +296,7 @@ class AgentRunner:
 
         # 2. 注入连接到 Context
         context._shared["__opencode_client__"] = self.get_client()
+        context._shared["__mcp_service__"] = self.get_mcp_service()
         if self._session_mgr:
             context._shared["__sessions__"] = self._session_mgr._sessions
 
@@ -370,14 +349,12 @@ class AgentRunner:
                         deliverable=deliverable,
                         attempts=attempt + 1,
                     )
-                else:
-                    # 验证失败
-                    deliverable.mark_retrying(validation.feedback or "")
-                    context.set_feedback(validation.feedback or "验证失败")
 
-                    logger.warning(
-                        f"Agent {agent_id} 验证失败 (尝试 {attempt + 1}): {validation.feedback}"
-                    )
+                deliverable.mark_retrying(validation.feedback or "")
+                context.set_feedback(validation.feedback or "验证失败")
+                logger.warning(
+                    f"Agent {agent_id} 验证失败 (尝试 {attempt + 1}): {validation.feedback}"
+                )
 
             except Exception as e:
                 error_msg = str(e)
@@ -443,7 +420,7 @@ class AgentRunner:
         if max_workers is None:
             max_workers = len(tasks)
 
-        results_map = {}
+        results_map: Dict[int, AgentResult] = {}
         results_lock = threading.Lock()
 
         def _execute_task(idx: int, agent_id: str, context: AgentContext) -> Tuple[int, AgentResult]:
@@ -486,8 +463,13 @@ class AgentRunner:
                             attempts=0,
                         )
 
-        # 按原始顺序返回结果
-        return [results_map.get(i, AgentResult(success=False, agent_id=tasks[i][0], error="未执行")) for i in range(len(tasks))]
+        return [
+            results_map.get(
+                i,
+                AgentResult(success=False, agent_id=tasks[i][0], error="未执行"),
+            )
+            for i in range(len(tasks))
+        ]
 
     def _save_deliverable(self, deliverable: Deliverable) -> Path:
         """保存交付件
@@ -539,6 +521,7 @@ class VulnAgentRunner:
         deliverables_path: Path,
         code_path: Path,
         opencode_url: str = "http://localhost:4097",
+        mcp_service: Optional[AuditMCPService] = None,
     ):
         self.config_dir = config_dir
         self.deliverables_path = deliverables_path
@@ -549,22 +532,13 @@ class VulnAgentRunner:
             opencode_url=opencode_url,
             config_dir=config_dir,
             deliverables_dir=deliverables_path,
+            mcp_service=mcp_service,
         )
 
     def init_git(self, repo_path: Optional[Path] = None) -> None:
-        """初始化 Git"""
         self._runner.init_git(repo_path or self.deliverables_path)
 
-    def run(self, agent_id: str, context: Dict[str, Any]) -> Dict[str, Any]:
-        """执行 Agent
-
-        Args:
-            agent_id: Agent 标识符
-            context: 执行上下文
-
-        Returns:
-            执行结果字典
-        """
+    def run(self, agent_id: str, context: Dict[str, object]) -> Dict[str, object]:
         task_data = context.get("task_data", context)
         shared_context = context.get("shared_context", {})
 
@@ -607,5 +581,6 @@ def create_agent_runner(
         max_retries=kwargs.get("max_retries", 3),
         config_dir=kwargs.get("config_dir"),
         deliverables_dir=deliverables_path,
+        mcp_service=kwargs.get("mcp_service"),
     )
     return runner
